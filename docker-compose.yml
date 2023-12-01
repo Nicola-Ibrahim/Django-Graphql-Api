@@ -1,0 +1,96 @@
+# Specify the version of the docker-compose file format
+version: "3.9"
+
+# Define the services that make up your application
+services:
+  db:
+    # Use the postgres:15-alpine image from Docker Hub
+    image: postgres:15.3-alpine
+
+    # Restart the container unless it is stopped by the user
+    restart: unless-stopped
+
+    # Set environment variables for the database configuration
+    environment:
+      POSTGRES_DB: dgraph
+      POSTGRES_USER: dgraph
+      POSTGRES_PASSWORD: dgraph
+
+    # Mount a named volume to persist the database data
+    volumes:
+      - postgresql-data:/var/lib/postgresql/data
+
+    # Add a healthcheck option
+    healthcheck:
+      # Use pg_isready to check if the database is accepting connections
+      test: pg_isready -U dgraph -d dgraph || exit 1
+      # Run the healthcheck every 10 seconds
+      interval: 10s
+      # Wait for 5 seconds before the first healthcheck
+      start_period: 5s
+      # Fail the healthcheck after 3 retries
+      retries: 3
+
+  backend:
+    container_name: backend_container
+
+    # Restart the container unless it is stopped by the user
+    restart: unless-stopped
+
+    # Use the backend image that is built from the Dockerfile in the current directory
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+
+    expose:
+      - 8000
+
+    environment:
+      - DGRAPH_SETTINGS_DJANGO_ENV:production
+      - DGRAPH_SETTINGS_DATABASES:'{"default":{"HOST":"db"}}'
+
+    env_file:
+      - ./.envs/.env
+
+    # Mount a named volume to persist the backend django project
+    volumes:
+      - static_data:/backend/src/static
+      - media_data:/backend/media
+
+    depends_on:
+      - db
+
+    healthcheck:
+      # Use curl to ping the /admin endpoint of your backend service
+      test: curl --fail http://localhost:8000/admin || exit 1
+      # Run the healthcheck every 10 seconds
+      interval: 10s
+      # Wait for 5 seconds before the first healthcheck
+      start_period: 5s
+      # Fail the healthcheck after 3 retries
+      retries: 3
+
+  nginx:
+    build:
+      context: ./
+      dockerfile: ./nginx/Dockerfile
+
+    # Restart the container unless it is stopped by the user
+    restart: unless-stopped
+
+    volumes:
+      - static_data:/backend/src/static
+      - media_data:/backend/media
+      - nginx_data:/etc/nginx
+
+    ports:
+      - 80:8080
+
+    depends_on:
+      - backend
+
+volumes:
+  postgresql-data:
+  static_data:
+  media_data:
+  nginx_data:
